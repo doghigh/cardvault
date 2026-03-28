@@ -60,7 +60,6 @@ export default function Scanner() {
   });
 
   const currentImage = currentSide === "front" ? imageFrontBase64 : imageBackBase64;
-  const setCurrentImage = currentSide === "front" ? setImageFrontBase64 : setImageBackBase64;
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -69,7 +68,13 @@ export default function Scanner() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const base64 = event.target.result;
-      setCurrentImage(base64);
+      
+      // Set the correct image based on current side
+      if (currentSide === "front") {
+        setImageFrontBase64(base64);
+      } else {
+        setImageBackBase64(base64);
+      }
       
       // Only analyze on front side (main card info)
       if (currentSide === "front") {
@@ -79,6 +84,9 @@ export default function Scanner() {
       }
     };
     reader.readAsDataURL(file);
+    
+    // Reset file input so same file can be selected again
+    e.target.value = '';
   };
 
   const analyzeImage = async (base64Data) => {
@@ -142,15 +150,17 @@ export default function Scanner() {
     ctx.drawImage(video, 0, 0);
     
     const base64 = canvas.toDataURL("image/jpeg", 0.9);
-    setCurrentImage(base64);
-    stopCamera();
     
     if (currentSide === "front") {
+      setImageFrontBase64(base64);
+      stopCamera();
       await analyzeImage(base64);
     } else {
+      setImageBackBase64(base64);
+      stopCamera();
       toast.success("Back image captured!");
     }
-  }, [stopCamera, currentSide, setCurrentImage]);
+  }, [stopCamera, currentSide]);
 
   const handleSaveCard = async () => {
     if (!cardData.card_name || !cardData.card_type) {
@@ -201,7 +211,11 @@ export default function Scanner() {
   };
 
   const resetCurrentSide = () => {
-    setCurrentImage(null);
+    if (currentSide === "front") {
+      setImageFrontBase64(null);
+    } else {
+      setImageBackBase64(null);
+    }
     stopCamera();
   };
 
