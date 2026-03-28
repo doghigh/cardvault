@@ -88,52 +88,56 @@ export default function Scanner() {
     }
 
     try {
-      let constraints;
+      let stream;
       
-      if (deviceId) {
-        // Use specific device if provided
-        constraints = {
-          video: { deviceId: { exact: deviceId } }
-        };
-      } else {
-        // Mobile-friendly default: prefer back camera
-        constraints = {
-          video: { facingMode: "environment" }
-        };
+      // Try different approaches to get camera
+      if (deviceId && deviceId !== "none" && deviceId !== "default") {
+        // Try specific device first
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: deviceId } }
+          });
+        } catch (e) {
+          console.log("Specific device failed, trying default");
+        }
       }
       
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // If no stream yet, try environment camera (back camera on mobile)
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
+          });
+        } catch (e) {
+          console.log("Environment camera failed, trying any camera");
+        }
+      }
       
-      if (videoRef.current) {
+      // If still no stream, try any camera
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true
+        });
+      }
+      
+      if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
-        // Use onloadedmetadata to ensure video is ready
         videoRef.current.onloadedmetadata = () => {
           videoRef.current.play()
             .then(() => {
               setCameraActive(true);
+              console.log("Camera started successfully");
             })
-            .catch(err => console.error("Play error:", err));
+            .catch(err => {
+              console.error("Play error:", err);
+              toast.error("Failed to start camera preview");
+            });
         };
       }
     } catch (error) {
       console.error("Camera error:", error);
-      
-      // Try with any available camera as fallback
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current.play()
-              .then(() => {
-                setCameraActive(true);
-              })
-              .catch(err => console.error("Play error:", err));
-          };
-        }
-      } catch (fallbackError) {
-        toast.error("Failed to access camera. Check permissions and try again.");
-      }
+      toast.error("Failed to access camera. Please check permissions.");
+      setCameraActive(false);
     }
   }, []);
 
@@ -141,27 +145,40 @@ export default function Scanner() {
   const loadVideoDevices = useCallback(async () => {
     setLoadingDevices(true);
     try {
+      // Check if mediaDevices API is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        console.log("mediaDevices API not supported");
+        setVideoDevices([]);
+        setLoadingDevices(false);
+        return null;
+      }
+
       // Request permission first to get device labels
       try {
         const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
         tempStream.getTracks().forEach(track => track.stop());
       } catch (permErr) {
-        console.log("Requesting camera permission...");
+        console.log("Camera permission request:", permErr.message);
       }
       
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(device => device.kind === 'videoinput');
+      
+      console.log("Found video devices:", videoInputs.length);
       setVideoDevices(videoInputs);
       
       // Set default device
-      if (videoInputs.length > 0 && !selectedDeviceId) {
-        setSelectedDeviceId(videoInputs[0].deviceId);
-        return videoInputs[0].deviceId;
+      if (videoInputs.length > 0) {
+        const deviceId = videoInputs[0].deviceId || "default";
+        if (!selectedDeviceId) {
+          setSelectedDeviceId(deviceId);
+        }
+        return deviceId;
       }
-      return selectedDeviceId;
+      return null;
     } catch (error) {
       console.error("Error enumerating devices:", error);
-      toast.error("Failed to detect video devices");
+      // Don't show error - we'll try direct camera access
       return null;
     } finally {
       setLoadingDevices(false);
@@ -350,9 +367,8 @@ export default function Scanner() {
   const activateCameraMode = async () => {
     setMode("camera");
     const deviceId = await loadVideoDevices();
-    if (deviceId) {
-      await startCamera(deviceId);
-    }
+    // Start camera regardless of whether we got a specific device ID
+    await startCamera(deviceId || "default");
   };
 
   const activateUploadMode = () => {
@@ -454,7 +470,7 @@ export default function Scanner() {
                   </Button>
                 </div>
                 <Select
-                  value={selectedDeviceId || "none"}
+                  value={selectedDeviceId || "default"}
                   onValueChange={(value) => value !== "none" && handleDeviceChange(value)}
                 >
                   <SelectTrigger 
@@ -464,21 +480,18 @@ export default function Scanner() {
                     <SelectValue placeholder={loadingDevices ? "Loading devices..." : "Select video source"} />
                   </SelectTrigger>
                   <SelectContent className="bg-zinc-900 border-white/10">
-                    {videoDevices.length === 0 ? (
-                      <SelectItem value="none" disabled className="text-zinc-500">
-                        No video devices found
+                    <SelectItem value="default" className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800">
+                      Default Camera
+                    </SelectItem>
+                    {videoDevices.map((device, index) => (
+                      <SelectItem 
+                        key={device.deviceId || `device-${index}`} 
+                        value={device.deviceId || `device-${index}`}
+                        className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
+                      >
+                        {device.label || `Camera ${index + 1}`}
                       </SelectItem>
-                    ) : (
-                      videoDevices.map((device, index) => (
-                        <SelectItem 
-                          key={device.deviceId || `device-${index}`} 
-                          value={device.deviceId || `device-${index}`}
-                          className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
-                        >
-                          {device.label || `Camera ${index + 1}`}
-                        </SelectItem>
-                      ))
-                    )}
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-zinc-500 mt-2">
@@ -579,16 +592,14 @@ export default function Scanner() {
               ) : mode === "camera" ? (
                 <div 
                   className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
-                  onClick={() => selectedDeviceId && startCamera(selectedDeviceId)}
+                  onClick={() => startCamera(selectedDeviceId || "default")}
                   data-testid="start-camera-area"
                 >
                   <Camera className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
-                    {loadingDevices ? "Loading cameras..." : "Click to start camera"}<br />
+                    {loadingDevices ? "Loading cameras..." : "Tap to start camera"}<br />
                     <span className="text-sm text-zinc-500">
-                      {videoDevices.length === 0 
-                        ? "No cameras detected" 
-                        : videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Camera ready'}
+                      {selectedDeviceId && videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Default Camera'}
                     </span>
                   </p>
                 </div>
@@ -630,8 +641,8 @@ export default function Scanner() {
 
             {mode === "camera" && !cameraActive && !currentImage && (
               <Button
-                onClick={() => startCamera(selectedDeviceId)}
-                disabled={!selectedDeviceId || loadingDevices}
+                onClick={() => startCamera(selectedDeviceId || "default")}
+                disabled={loadingDevices}
                 className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold disabled:opacity-50"
                 data-testid="start-camera-btn"
               >
