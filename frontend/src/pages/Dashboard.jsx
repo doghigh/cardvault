@@ -237,9 +237,9 @@ function CardItem({ card, getConditionBadge }) {
       data-testid={`card-${card.card_id}`}
     >
       <div className="aspect-[3/4] bg-zinc-800 relative">
-        {card.image_base64 ? (
+        {card.image_front_base64 ? (
           <img 
-            src={`data:image/jpeg;base64,${card.image_base64}`}
+            src={`data:image/jpeg;base64,${card.image_front_base64}`}
             alt={card.card_name}
             className="w-full h-full object-cover"
           />
@@ -273,9 +273,9 @@ function CardListItem({ card, getConditionBadge }) {
       data-testid={`card-list-${card.card_id}`}
     >
       <div className="w-16 h-20 bg-zinc-800 rounded overflow-hidden flex-shrink-0">
-        {card.image_base64 ? (
+        {card.image_front_base64 ? (
           <img 
-            src={`data:image/jpeg;base64,${card.image_base64}`}
+            src={`data:image/jpeg;base64,${card.image_front_base64}`}
             alt={card.card_name}
             className="w-full h-full object-cover"
           />

@@ -60,7 +60,8 @@ class Card(BaseModel):
     card_type: str  # Sports, Pokemon, TCG, etc.
     card_year: Optional[str] = None
     damage_notes: Optional[str] = None
-    image_base64: Optional[str] = None
+    image_front_base64: Optional[str] = None
+    image_back_base64: Optional[str] = None
     avg_price: Optional[float] = None
     top_price: Optional[float] = None
     bottom_price: Optional[float] = None
@@ -74,7 +75,8 @@ class CardCreate(BaseModel):
     card_type: str
     card_year: Optional[str] = None
     damage_notes: Optional[str] = None
-    image_base64: Optional[str] = None
+    image_front_base64: Optional[str] = None
+    image_back_base64: Optional[str] = None
 
 class CardUpdate(BaseModel):
     card_name: Optional[str] = None
@@ -345,7 +347,7 @@ async def analyze_card(
         "card_type": result.card_type,
         "card_year": result.card_year,
         "damage_notes": result.damage_notes,
-        "image_base64": image_base64
+        "image_front_base64": image_base64
     }
 
 @api_router.post("/cards/analyze-base64")
@@ -355,19 +357,26 @@ async def analyze_card_base64(
 ):
     """Analyze card image from base64 string"""
     image_base64 = data.get("image_base64", "")
+    side = data.get("side", "front")  # front or back
     
     if "," in image_base64:
         image_base64 = image_base64.split(",")[1]
     
     result = await analyze_card_image(image_base64)
     
-    return {
+    response = {
         "card_name": result.card_name,
         "card_type": result.card_type,
         "card_year": result.card_year,
         "damage_notes": result.damage_notes,
-        "image_base64": image_base64
     }
+    
+    if side == "back":
+        response["image_back_base64"] = image_base64
+    else:
+        response["image_front_base64"] = image_base64
+    
+    return response
 
 @api_router.post("/cards", response_model=dict)
 async def create_card(
@@ -381,7 +390,8 @@ async def create_card(
         card_type=card_data.card_type,
         card_year=card_data.card_year,
         damage_notes=card_data.damage_notes,
-        image_base64=card_data.image_base64
+        image_front_base64=card_data.image_front_base64,
+        image_back_base64=card_data.image_back_base64
     )
     
     card_dict = card.model_dump()

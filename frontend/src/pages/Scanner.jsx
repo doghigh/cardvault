@@ -21,7 +21,9 @@ import {
   ArrowLeft, 
   Loader2,
   Check,
-  X
+  X,
+  RotateCcw,
+  ArrowRight
 } from "lucide-react";
 
 const CARD_TYPES = [
@@ -43,7 +45,9 @@ export default function Scanner() {
   const canvasRef = useRef(null);
   
   const [mode, setMode] = useState("upload"); // upload | camera
-  const [imageBase64, setImageBase64] = useState(null);
+  const [currentSide, setCurrentSide] = useState("front"); // front | back
+  const [imageFrontBase64, setImageFrontBase64] = useState(null);
+  const [imageBackBase64, setImageBackBase64] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -55,6 +59,9 @@ export default function Scanner() {
     damage_notes: ""
   });
 
+  const currentImage = currentSide === "front" ? imageFrontBase64 : imageBackBase64;
+  const setCurrentImage = currentSide === "front" ? setImageFrontBase64 : setImageBackBase64;
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -62,8 +69,14 @@ export default function Scanner() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const base64 = event.target.result;
-      setImageBase64(base64);
-      await analyzeImage(base64);
+      setCurrentImage(base64);
+      
+      // Only analyze on front side (main card info)
+      if (currentSide === "front") {
+        await analyzeImage(base64);
+      } else {
+        toast.success("Back image captured!");
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -72,7 +85,8 @@ export default function Scanner() {
     setAnalyzing(true);
     try {
       const response = await axios.post(`${API}/cards/analyze-base64`, {
-        image_base64: base64Data
+        image_base64: base64Data,
+        side: currentSide
       });
       
       setCardData({
@@ -128,10 +142,15 @@ export default function Scanner() {
     ctx.drawImage(video, 0, 0);
     
     const base64 = canvas.toDataURL("image/jpeg", 0.9);
-    setImageBase64(base64);
+    setCurrentImage(base64);
     stopCamera();
-    await analyzeImage(base64);
-  }, [stopCamera]);
+    
+    if (currentSide === "front") {
+      await analyzeImage(base64);
+    } else {
+      toast.success("Back image captured!");
+    }
+  }, [stopCamera, currentSide, setCurrentImage]);
 
   const handleSaveCard = async () => {
     if (!cardData.card_name || !cardData.card_type) {
@@ -139,12 +158,27 @@ export default function Scanner() {
       return;
     }
 
+    if (!imageFrontBase64) {
+      toast.error("Front image is required");
+      return;
+    }
+
+    if (!imageBackBase64) {
+      toast.error("Back image is required");
+      return;
+    }
+
     setSaving(true);
     try {
       // Extract just the base64 data without the data URL prefix
-      let base64Data = imageBase64;
-      if (base64Data && base64Data.includes(",")) {
-        base64Data = base64Data.split(",")[1];
+      let frontData = imageFrontBase64;
+      if (frontData && frontData.includes(",")) {
+        frontData = frontData.split(",")[1];
+      }
+
+      let backData = imageBackBase64;
+      if (backData && backData.includes(",")) {
+        backData = backData.split(",")[1];
       }
 
       await axios.post(`${API}/cards`, {
@@ -152,7 +186,8 @@ export default function Scanner() {
         card_type: cardData.card_type,
         card_year: cardData.card_year || null,
         damage_notes: cardData.damage_notes || null,
-        image_base64: base64Data || null
+        image_front_base64: frontData,
+        image_back_base64: backData
       });
       
       toast.success("Card saved to collection!");
@@ -165,14 +200,31 @@ export default function Scanner() {
     }
   };
 
-  const resetScanner = () => {
-    setImageBase64(null);
+  const resetCurrentSide = () => {
+    setCurrentImage(null);
+    stopCamera();
+  };
+
+  const resetAll = () => {
+    setImageFrontBase64(null);
+    setImageBackBase64(null);
+    setCurrentSide("front");
     setCardData({
       card_name: "",
       card_type: "",
       card_year: "",
       damage_notes: ""
     });
+    stopCamera();
+  };
+
+  const switchToBack = () => {
+    setCurrentSide("back");
+    stopCamera();
+  };
+
+  const switchToFront = () => {
+    setCurrentSide("front");
     stopCamera();
   };
 
@@ -202,18 +254,39 @@ export default function Scanner() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-8">Scan Card</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-2">Scan Card</h1>
+        <p className="text-zinc-400 mb-8">Capture both front and back of your card</p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left: Image Capture */}
           <div className="bg-zinc-900 border border-white/10 rounded-lg p-6">
+            {/* Side Toggle */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant={currentSide === "front" ? "default" : "outline"}
+                onClick={switchToFront}
+                data-testid="front-side-btn"
+                className={`flex-1 ${currentSide === "front" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}`}
+              >
+                Front {imageFrontBase64 && <Check className="w-4 h-4 ml-2" />}
+              </Button>
+              <Button
+                variant={currentSide === "back" ? "default" : "outline"}
+                onClick={switchToBack}
+                data-testid="back-side-btn"
+                className={`flex-1 ${currentSide === "back" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}`}
+              >
+                Back {imageBackBase64 && <Check className="w-4 h-4 ml-2" />}
+              </Button>
+            </div>
+
             {/* Mode Toggle */}
             <div className="flex gap-2 mb-6">
               <Button
                 variant={mode === "upload" ? "default" : "outline"}
                 onClick={() => { setMode("upload"); stopCamera(); }}
                 data-testid="upload-mode-btn"
-                className={mode === "upload" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}
+                className={`flex-1 ${mode === "upload" ? "bg-zinc-700 text-zinc-50" : "border-white/20 text-zinc-300"}`}
               >
                 <Upload className="w-4 h-4 mr-2" />
                 Upload
@@ -222,7 +295,7 @@ export default function Scanner() {
                 variant={mode === "camera" ? "default" : "outline"}
                 onClick={() => { setMode("camera"); startCamera(); }}
                 data-testid="camera-mode-btn"
-                className={mode === "camera" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}
+                className={`flex-1 ${mode === "camera" ? "bg-zinc-700 text-zinc-50" : "border-white/20 text-zinc-300"}`}
               >
                 <Camera className="w-4 h-4 mr-2" />
                 Camera
@@ -231,11 +304,11 @@ export default function Scanner() {
 
             {/* Image Preview / Upload Area */}
             <div className="aspect-[3/4] bg-zinc-800 rounded-lg overflow-hidden relative mb-4">
-              {imageBase64 ? (
+              {currentImage ? (
                 <>
                   <img 
-                    src={imageBase64}
-                    alt="Card preview"
+                    src={currentImage}
+                    alt={`Card ${currentSide}`}
                     className="w-full h-full object-contain"
                   />
                   {analyzing && (
@@ -252,12 +325,15 @@ export default function Scanner() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={resetScanner}
-                    data-testid="reset-btn"
+                    onClick={resetCurrentSide}
+                    data-testid="reset-side-btn"
                     className="absolute top-2 right-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-50"
                   >
                     <X className="w-4 h-4" />
                   </Button>
+                  <div className="absolute bottom-2 left-2 bg-zinc-900/80 px-3 py-1 rounded text-sm text-zinc-50 uppercase tracking-wider">
+                    {currentSide}
+                  </div>
                 </>
               ) : mode === "camera" && cameraActive ? (
                 <>
@@ -288,6 +364,9 @@ export default function Scanner() {
                       <line x1="90" y1="90" x2="90" y2="80" stroke="rgb(245, 158, 11)" strokeWidth="1" />
                     </svg>
                   </div>
+                  <div className="absolute bottom-2 left-2 bg-zinc-900/80 px-3 py-1 rounded text-sm text-zinc-50 uppercase tracking-wider">
+                    {currentSide}
+                  </div>
                 </>
               ) : (
                 <div 
@@ -297,7 +376,7 @@ export default function Scanner() {
                 >
                   <Upload className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
-                    Click or drag to upload<br />
+                    Upload {currentSide} of card<br />
                     <span className="text-sm text-zinc-500">PNG, JPG, WEBP</span>
                   </p>
                 </div>
@@ -314,25 +393,77 @@ export default function Scanner() {
               data-testid="file-input"
             />
 
-            {mode === "upload" && !imageBase64 && (
+            {mode === "upload" && !currentImage && (
               <Button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
                 data-testid="select-file-btn"
               >
                 <Upload className="w-4 h-4 mr-2" />
-                Select File
+                Select {currentSide} Image
               </Button>
             )}
 
-            {mode === "camera" && cameraActive && !imageBase64 && (
+            {mode === "camera" && cameraActive && !currentImage && (
               <Button
                 onClick={captureImage}
                 className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
                 data-testid="capture-btn"
               >
                 <Camera className="w-4 h-4 mr-2" />
-                Capture
+                Capture {currentSide}
+              </Button>
+            )}
+
+            {/* Quick navigation between sides */}
+            {currentImage && currentSide === "front" && !imageBackBase64 && (
+              <Button
+                onClick={switchToBack}
+                className="w-full mt-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
+                data-testid="next-to-back-btn"
+              >
+                Next: Capture Back
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            )}
+
+            {/* Thumbnails */}
+            <div className="flex gap-4 mt-4">
+              <div 
+                className={`flex-1 aspect-[3/4] rounded border-2 overflow-hidden cursor-pointer ${currentSide === "front" ? "border-amber-500" : "border-white/10"}`}
+                onClick={switchToFront}
+              >
+                {imageFrontBase64 ? (
+                  <img src={imageFrontBase64} alt="Front" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                    <span className="text-xs text-zinc-500">FRONT</span>
+                  </div>
+                )}
+              </div>
+              <div 
+                className={`flex-1 aspect-[3/4] rounded border-2 overflow-hidden cursor-pointer ${currentSide === "back" ? "border-amber-500" : "border-white/10"}`}
+                onClick={switchToBack}
+              >
+                {imageBackBase64 ? (
+                  <img src={imageBackBase64} alt="Back" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                    <span className="text-xs text-zinc-500">BACK</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {(imageFrontBase64 || imageBackBase64) && (
+              <Button
+                variant="ghost"
+                onClick={resetAll}
+                className="w-full mt-4 text-zinc-400 hover:text-zinc-50"
+                data-testid="reset-all-btn"
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Reset All
               </Button>
             )}
           </div>
@@ -405,10 +536,33 @@ export default function Scanner() {
                 />
               </div>
 
+              {/* Image status */}
+              <div className="p-3 bg-zinc-800 rounded-lg">
+                <p className="text-xs text-zinc-400 uppercase tracking-wider mb-2">Images</p>
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-2">
+                    {imageFrontBase64 ? (
+                      <Check className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <X className="w-4 h-4 text-zinc-500" />
+                    )}
+                    <span className={imageFrontBase64 ? "text-zinc-50" : "text-zinc-500"}>Front</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {imageBackBase64 ? (
+                      <Check className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <X className="w-4 h-4 text-zinc-500" />
+                    )}
+                    <span className={imageBackBase64 ? "text-zinc-50" : "text-zinc-500"}>Back</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="pt-4 flex gap-3">
                 <Button
                   onClick={handleSaveCard}
-                  disabled={saving || !cardData.card_name || !cardData.card_type}
+                  disabled={saving || !cardData.card_name || !cardData.card_type || !imageFrontBase64 || !imageBackBase64}
                   data-testid="save-card-btn"
                   className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold disabled:opacity-50"
                 >

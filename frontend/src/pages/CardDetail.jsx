@@ -211,20 +211,44 @@ export default function CardDetail() {
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Card Image */}
-          <div className="bg-zinc-900 border border-white/10 rounded-lg overflow-hidden">
-            <div className="aspect-[3/4] bg-zinc-800">
-              {card.image_base64 ? (
-                <img
-                  src={`data:image/jpeg;base64,${card.image_base64}`}
-                  alt={card.card_name}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <CreditCard className="w-24 h-24 text-zinc-600" />
-                </div>
-              )}
+          {/* Left: Card Images */}
+          <div className="space-y-4">
+            <div className="bg-zinc-900 border border-white/10 rounded-lg overflow-hidden">
+              <div className="p-3 border-b border-white/10">
+                <p className="text-xs text-zinc-400 uppercase tracking-wider">Front</p>
+              </div>
+              <div className="aspect-[3/4] bg-zinc-800">
+                {card.image_front_base64 ? (
+                  <img
+                    src={`data:image/jpeg;base64,${card.image_front_base64}`}
+                    alt={`${card.card_name} - Front`}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <CreditCard className="w-16 h-16 text-zinc-600" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-zinc-900 border border-white/10 rounded-lg overflow-hidden">
+              <div className="p-3 border-b border-white/10">
+                <p className="text-xs text-zinc-400 uppercase tracking-wider">Back</p>
+              </div>
+              <div className="aspect-[3/4] bg-zinc-800">
+                {card.image_back_base64 ? (
+                  <img
+                    src={`data:image/jpeg;base64,${card.image_back_base64}`}
+                    alt={`${card.card_name} - Back`}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <CreditCard className="w-16 h-16 text-zinc-600" />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

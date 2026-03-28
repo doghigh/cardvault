@@ -8,10 +8,10 @@ from datetime import datetime
 import time
 
 class CardCatalogAPITester:
-    def __init__(self, base_url="https://card-catalog-pro-1.preview.emergentagent.com"):
+    def __init__(self, base_url="https://card-catalog-pro-1.preview.emergentagent.com", session_token=None):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
-        self.session_token = None
+        self.session_token = session_token or "test_session_frontback_123"
         self.user_id = None
         self.tests_run = 0
         self.tests_passed = 0
@@ -130,19 +130,23 @@ print('Test user created successfully');
             return False
 
     def test_create_card(self):
-        """Test POST /api/cards endpoint"""
+        """Test POST /api/cards endpoint with front and back images"""
         headers = {
             "Authorization": f"Bearer {self.session_token}",
             "Content-Type": "application/json"
         }
         
-        # Create a simple test card
+        # Create a simple test image (1x1 pixel PNG in base64)
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        # Create a test card with both front and back images
         card_data = {
             "card_name": "Test Card 1986 Topps",
             "card_type": "Sports - Baseball",
             "card_year": "1986",
             "damage_notes": "Mint condition",
-            "image_base64": None
+            "image_front_base64": test_image_b64,
+            "image_back_base64": test_image_b64
         }
         
         try:
@@ -156,13 +160,17 @@ print('Test user created successfully');
             if success:
                 card = response.json()
                 self.test_card_id = card.get('card_id')
-                details = f"Card ID: {self.test_card_id}"
+                # Verify both images are present
+                has_front = card.get('image_front_base64') is not None
+                has_back = card.get('image_back_base64') is not None
+                success = success and has_front and has_back
+                details = f"Card ID: {self.test_card_id}, Front: {has_front}, Back: {has_back}"
             else:
                 details = f"Status: {response.status_code}, Response: {response.text[:100]}"
-            self.log_test("Create Card", success, details)
+            self.log_test("Create Card (Front/Back Images)", success, details)
             return success
         except Exception as e:
-            self.log_test("Create Card", False, str(e))
+            self.log_test("Create Card (Front/Back Images)", False, str(e))
             return False
 
     def test_get_card_by_id(self):
@@ -290,7 +298,8 @@ print('Test user created successfully');
         test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
         
         data = {
-            "image_base64": test_image_b64
+            "image_base64": test_image_b64,
+            "side": "front"
         }
         
         try:
@@ -303,13 +312,49 @@ print('Test user created successfully');
             success = response.status_code == 200
             if success:
                 result = response.json()
-                details = f"Analyzed: {result.get('card_name', 'Unknown')}"
+                has_front_image = result.get('image_front_base64') is not None
+                details = f"Analyzed: {result.get('card_name', 'Unknown')}, Front image: {has_front_image}"
             else:
                 details = f"Status: {response.status_code}, Response: {response.text[:100]}"
-            self.log_test("Card Analysis (GPT-5.2)", success, details)
+            self.log_test("Card Analysis (GPT-5.2) - Front", success, details)
             return success
         except Exception as e:
-            self.log_test("Card Analysis (GPT-5.2)", False, str(e))
+            self.log_test("Card Analysis (GPT-5.2) - Front", False, str(e))
+            return False
+
+    def test_card_analysis_back(self):
+        """Test POST /api/cards/analyze-base64 endpoint for back side"""
+        headers = {
+            "Authorization": f"Bearer {self.session_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Create a simple test image (1x1 pixel PNG in base64)
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        data = {
+            "image_base64": test_image_b64,
+            "side": "back"
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/cards/analyze-base64", 
+                headers=headers, 
+                json=data,
+                timeout=30  # Longer timeout for AI analysis
+            )
+            success = response.status_code == 200
+            if success:
+                result = response.json()
+                has_back_image = result.get('image_back_base64') is not None
+                details = f"Analyzed: {result.get('card_name', 'Unknown')}, Back image: {has_back_image}"
+            else:
+                details = f"Status: {response.status_code}, Response: {response.text[:100]}"
+            self.log_test("Card Analysis (GPT-5.2) - Back", success, details)
+            return success
+        except Exception as e:
+            self.log_test("Card Analysis (GPT-5.2) - Back", False, str(e))
             return False
 
     def cleanup_test_data(self):
@@ -352,10 +397,14 @@ print('Test data cleaned up');
             print("❌ Health check failed - stopping tests")
             return False
         
-        # Create test session
-        if not self.create_test_session():
-            print("❌ Test session creation failed - stopping tests")
-            return False
+        # Use provided session token or create test session
+        if self.session_token == "test_session_frontback_123":
+            print(f"✅ Using provided session token: {self.session_token}")
+        else:
+            # Create test session
+            if not self.create_test_session():
+                print("❌ Test session creation failed - stopping tests")
+                return False
         
         # Run auth tests
         if not self.test_auth_me():
@@ -373,6 +422,7 @@ print('Test data cleaned up');
         # Test AI integration (may be slow)
         print("\n🤖 Testing AI Integration...")
         self.test_card_analysis()
+        self.test_card_analysis_back()
         
         # Cleanup
         self.cleanup_test_data()
