@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API } from "../App";
@@ -23,7 +23,10 @@ import {
   Check,
   X,
   RotateCcw,
-  ArrowRight
+  ArrowRight,
+  MonitorUp,
+  ScanLine,
+  RefreshCw
 } from "lucide-react";
 
 const CARD_TYPES = [
@@ -52,6 +55,11 @@ export default function Scanner() {
   const [cameraActive, setCameraActive] = useState(false);
   const [saving, setSaving] = useState(false);
   
+  // Device selection
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  
   const [cardData, setCardData] = useState({
     card_name: "",
     card_type: "",
@@ -61,6 +69,51 @@ export default function Scanner() {
 
   const currentImage = currentSide === "front" ? imageFrontBase64 : imageBackBase64;
 
+  // Enumerate available video devices (cameras, virtual cameras, capture cards)
+  const loadVideoDevices = useCallback(async () => {
+    setLoadingDevices(true);
+    try {
+      // Request permission first to get device labels
+      await navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => stream.getTracks().forEach(track => track.stop()))
+        .catch(() => {});
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(device => device.kind === 'videoinput');
+      setVideoDevices(videoInputs);
+      
+      // Set default device if none selected
+      if (videoInputs.length > 0 && !selectedDeviceId) {
+        setSelectedDeviceId(videoInputs[0].deviceId);
+      }
+    } catch (error) {
+      console.error("Error enumerating devices:", error);
+      toast.error("Failed to detect video devices");
+    } finally {
+      setLoadingDevices(false);
+    }
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    if (mode === "camera") {
+      loadVideoDevices();
+    }
+  }, [mode, loadVideoDevices]);
+
+  // Listen for device changes (when user plugs in new camera/scanner)
+  useEffect(() => {
+    const handleDeviceChange = () => {
+      if (mode === "camera") {
+        loadVideoDevices();
+      }
+    };
+    
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [mode, loadVideoDevices]);
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -69,23 +122,15 @@ export default function Scanner() {
     reader.onload = async (event) => {
       const base64 = event.target.result;
       
-      // Set the correct image based on current side
       if (currentSide === "front") {
         setImageFrontBase64(base64);
-      } else {
-        setImageBackBase64(base64);
-      }
-      
-      // Only analyze on front side (main card info)
-      if (currentSide === "front") {
         await analyzeImage(base64);
       } else {
+        setImageBackBase64(base64);
         toast.success("Back image captured!");
       }
     };
     reader.readAsDataURL(file);
-    
-    // Reset file input so same file can be selected again
     e.target.value = '';
   };
 
@@ -113,11 +158,22 @@ export default function Scanner() {
     }
   };
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (deviceId) => {
+    // Stop any existing stream first
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "environment" } 
-      });
+      const constraints = {
+        video: deviceId 
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode: "environment" }
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
@@ -125,7 +181,7 @@ export default function Scanner() {
       }
     } catch (error) {
       console.error("Camera error:", error);
-      toast.error("Failed to access camera");
+      toast.error("Failed to access camera. Check permissions and try again.");
     }
   }, []);
 
@@ -137,6 +193,14 @@ export default function Scanner() {
       setCameraActive(false);
     }
   }, []);
+
+  // Handle device selection change
+  const handleDeviceChange = async (deviceId) => {
+    setSelectedDeviceId(deviceId);
+    if (cameraActive) {
+      await startCamera(deviceId);
+    }
+  };
 
   const captureImage = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -180,7 +244,6 @@ export default function Scanner() {
 
     setSaving(true);
     try {
-      // Extract just the base64 data without the data URL prefix
       let frontData = imageFrontBase64;
       if (frontData && frontData.includes(",")) {
         frontData = frontData.split(",")[1];
@@ -242,6 +305,14 @@ export default function Scanner() {
     stopCamera();
   };
 
+  const activateCameraMode = async () => {
+    setMode("camera");
+    await loadVideoDevices();
+    if (selectedDeviceId) {
+      await startCamera(selectedDeviceId);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950">
       {/* Navigation */}
@@ -295,7 +366,7 @@ export default function Scanner() {
             </div>
 
             {/* Mode Toggle */}
-            <div className="flex gap-2 mb-6">
+            <div className="flex gap-2 mb-4">
               <Button
                 variant={mode === "upload" ? "default" : "outline"}
                 onClick={() => { setMode("upload"); stopCamera(); }}
@@ -303,11 +374,11 @@ export default function Scanner() {
                 className={`flex-1 ${mode === "upload" ? "bg-zinc-700 text-zinc-50" : "border-white/20 text-zinc-300"}`}
               >
                 <Upload className="w-4 h-4 mr-2" />
-                Upload
+                File / Scanner
               </Button>
               <Button
                 variant={mode === "camera" ? "default" : "outline"}
-                onClick={() => { setMode("camera"); startCamera(); }}
+                onClick={activateCameraMode}
                 data-testid="camera-mode-btn"
                 className={`flex-1 ${mode === "camera" ? "bg-zinc-700 text-zinc-50" : "border-white/20 text-zinc-300"}`}
               >
@@ -315,6 +386,73 @@ export default function Scanner() {
                 Camera
               </Button>
             </div>
+
+            {/* Device Selector (Camera Mode) */}
+            {mode === "camera" && (
+              <div className="mb-4 p-3 bg-zinc-800 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="text-xs text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <MonitorUp className="w-4 h-4" />
+                    Video Source
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={loadVideoDevices}
+                    disabled={loadingDevices}
+                    className="text-zinc-400 hover:text-zinc-50 h-6 px-2"
+                    data-testid="refresh-devices-btn"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${loadingDevices ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+                <Select
+                  value={selectedDeviceId}
+                  onValueChange={handleDeviceChange}
+                >
+                  <SelectTrigger 
+                    data-testid="device-select"
+                    className="bg-zinc-900 border-white/10 text-zinc-50"
+                  >
+                    <SelectValue placeholder={loadingDevices ? "Loading devices..." : "Select video source"} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-white/10">
+                    {videoDevices.length === 0 ? (
+                      <SelectItem value="none" disabled className="text-zinc-500">
+                        No video devices found
+                      </SelectItem>
+                    ) : (
+                      videoDevices.map((device, index) => (
+                        <SelectItem 
+                          key={device.deviceId} 
+                          value={device.deviceId}
+                          className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
+                        >
+                          {device.label || `Camera ${index + 1}`}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-zinc-500 mt-2">
+                  Includes webcams, virtual cameras (OBS, etc.), and capture cards
+                </p>
+              </div>
+            )}
+
+            {/* Scanner Info (Upload Mode) */}
+            {mode === "upload" && (
+              <div className="mb-4 p-3 bg-zinc-800 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <ScanLine className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm text-zinc-300">Flatbed Scanner Support</span>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Use your scanner software to scan the card, then upload the image file here. 
+                  Supports JPEG, PNG, WEBP, TIFF, and BMP formats.
+                </p>
+              </div>
+            )}
 
             {/* Image Preview / Upload Area */}
             <div className="aspect-[3/4] bg-zinc-800 rounded-lg overflow-hidden relative mb-4">
@@ -382,6 +520,20 @@ export default function Scanner() {
                     {currentSide}
                   </div>
                 </>
+              ) : mode === "camera" && !cameraActive ? (
+                <div 
+                  className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
+                  onClick={() => startCamera(selectedDeviceId)}
+                  data-testid="start-camera-area"
+                >
+                  <Camera className="w-12 h-12 text-zinc-500 mb-4" />
+                  <p className="text-zinc-400 text-center">
+                    Click to start camera<br />
+                    <span className="text-sm text-zinc-500">
+                      {selectedDeviceId ? videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Selected camera' : 'No camera selected'}
+                    </span>
+                  </p>
+                </div>
               ) : (
                 <div 
                   className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
@@ -391,7 +543,7 @@ export default function Scanner() {
                   <Upload className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
                     Upload {currentSide} of card<br />
-                    <span className="text-sm text-zinc-500">PNG, JPG, WEBP</span>
+                    <span className="text-sm text-zinc-500">From scanner or file</span>
                   </p>
                 </div>
               )}
@@ -402,7 +554,7 @@ export default function Scanner() {
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp"
               className="hidden"
               data-testid="file-input"
             />
@@ -415,6 +567,18 @@ export default function Scanner() {
               >
                 <Upload className="w-4 h-4 mr-2" />
                 Select {currentSide} Image
+              </Button>
+            )}
+
+            {mode === "camera" && !cameraActive && !currentImage && (
+              <Button
+                onClick={() => startCamera(selectedDeviceId)}
+                disabled={!selectedDeviceId}
+                className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold disabled:opacity-50"
+                data-testid="start-camera-btn"
+              >
+                <Camera className="w-4 h-4 mr-2" />
+                Start Camera
               </Button>
             )}
 
