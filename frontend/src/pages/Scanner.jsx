@@ -454,8 +454,8 @@ export default function Scanner() {
                   </Button>
                 </div>
                 <Select
-                  value={selectedDeviceId}
-                  onValueChange={handleDeviceChange}
+                  value={selectedDeviceId || "none"}
+                  onValueChange={(value) => value !== "none" && handleDeviceChange(value)}
                 >
                   <SelectTrigger 
                     data-testid="device-select"
@@ -471,8 +471,8 @@ export default function Scanner() {
                     ) : (
                       videoDevices.map((device, index) => (
                         <SelectItem 
-                          key={device.deviceId} 
-                          value={device.deviceId}
+                          key={device.deviceId || `device-${index}`} 
+                          value={device.deviceId || `device-${index}`}
                           className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
                         >
                           {device.label || `Camera ${index + 1}`}
