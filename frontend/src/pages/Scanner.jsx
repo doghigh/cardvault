@@ -1,0 +1,437 @@
+import { useState, useRef, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
+import { API } from "../App";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Textarea } from "../components/ui/textarea";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/ui/select";
+import { toast } from "sonner";
+import { 
+  CreditCard, 
+  Upload, 
+  Camera, 
+  ArrowLeft, 
+  Loader2,
+  Check,
+  X
+} from "lucide-react";
+
+const CARD_TYPES = [
+  "Sports - Baseball",
+  "Sports - Basketball", 
+  "Sports - Football",
+  "Sports - Hockey",
+  "Pokemon",
+  "Yu-Gi-Oh",
+  "Magic: The Gathering",
+  "Other TCG",
+  "Other"
+];
+
+export default function Scanner() {
+  const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  
+  const [mode, setMode] = useState("upload"); // upload | camera
+  const [imageBase64, setImageBase64] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [saving, setSaving] = useState(false);
+  
+  const [cardData, setCardData] = useState({
+    card_name: "",
+    card_type: "",
+    card_year: "",
+    damage_notes: ""
+  });
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target.result;
+      setImageBase64(base64);
+      await analyzeImage(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const analyzeImage = async (base64Data) => {
+    setAnalyzing(true);
+    try {
+      const response = await axios.post(`${API}/cards/analyze-base64`, {
+        image_base64: base64Data
+      });
+      
+      setCardData({
+        card_name: response.data.card_name || "",
+        card_type: response.data.card_type || "",
+        card_year: response.data.card_year || "",
+        damage_notes: response.data.damage_notes || ""
+      });
+      
+      toast.success("Card analyzed successfully!");
+    } catch (error) {
+      console.error("Analysis error:", error);
+      toast.error("Failed to analyze card. Please fill in details manually.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "environment" } 
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setCameraActive(true);
+      }
+    } catch (error) {
+      console.error("Camera error:", error);
+      toast.error("Failed to access camera");
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+      setCameraActive(false);
+    }
+  }, []);
+
+  const captureImage = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+    
+    const base64 = canvas.toDataURL("image/jpeg", 0.9);
+    setImageBase64(base64);
+    stopCamera();
+    await analyzeImage(base64);
+  }, [stopCamera]);
+
+  const handleSaveCard = async () => {
+    if (!cardData.card_name || !cardData.card_type) {
+      toast.error("Card name and type are required");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Extract just the base64 data without the data URL prefix
+      let base64Data = imageBase64;
+      if (base64Data && base64Data.includes(",")) {
+        base64Data = base64Data.split(",")[1];
+      }
+
+      await axios.post(`${API}/cards`, {
+        card_name: cardData.card_name,
+        card_type: cardData.card_type,
+        card_year: cardData.card_year || null,
+        damage_notes: cardData.damage_notes || null,
+        image_base64: base64Data || null
+      });
+      
+      toast.success("Card saved to collection!");
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Save error:", error);
+      toast.error("Failed to save card");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetScanner = () => {
+    setImageBase64(null);
+    setCardData({
+      card_name: "",
+      card_type: "",
+      card_year: "",
+      damage_notes: ""
+    });
+    stopCamera();
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950">
+      {/* Navigation */}
+      <header className="glass sticky top-0 z-50 border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <Link to="/dashboard" className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-500 flex items-center justify-center">
+              <CreditCard className="w-5 h-5 text-zinc-950" strokeWidth={1.5} />
+            </div>
+            <span className="text-xl font-bold text-zinc-50 tracking-tight">CardVault</span>
+          </Link>
+
+          <Link to="/dashboard">
+            <Button 
+              variant="ghost" 
+              data-testid="back-btn"
+              className="text-zinc-300 hover:text-zinc-50"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-8">Scan Card</h1>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left: Image Capture */}
+          <div className="bg-zinc-900 border border-white/10 rounded-lg p-6">
+            {/* Mode Toggle */}
+            <div className="flex gap-2 mb-6">
+              <Button
+                variant={mode === "upload" ? "default" : "outline"}
+                onClick={() => { setMode("upload"); stopCamera(); }}
+                data-testid="upload-mode-btn"
+                className={mode === "upload" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Upload
+              </Button>
+              <Button
+                variant={mode === "camera" ? "default" : "outline"}
+                onClick={() => { setMode("camera"); startCamera(); }}
+                data-testid="camera-mode-btn"
+                className={mode === "camera" ? "bg-amber-500 text-zinc-950" : "border-white/20 text-zinc-300"}
+              >
+                <Camera className="w-4 h-4 mr-2" />
+                Camera
+              </Button>
+            </div>
+
+            {/* Image Preview / Upload Area */}
+            <div className="aspect-[3/4] bg-zinc-800 rounded-lg overflow-hidden relative mb-4">
+              {imageBase64 ? (
+                <>
+                  <img 
+                    src={imageBase64}
+                    alt="Card preview"
+                    className="w-full h-full object-contain"
+                  />
+                  {analyzing && (
+                    <div className="absolute inset-0 bg-zinc-950/80 flex flex-col items-center justify-center">
+                      <div className="relative w-full h-full">
+                        <div className="absolute left-0 right-0 h-1 bg-amber-500 scanner-line"></div>
+                      </div>
+                      <div className="absolute flex flex-col items-center">
+                        <Loader2 className="w-8 h-8 text-amber-500 animate-spin mb-2" />
+                        <p className="text-zinc-300 text-sm">Analyzing card...</p>
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={resetScanner}
+                    data-testid="reset-btn"
+                    className="absolute top-2 right-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-50"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </>
+              ) : mode === "camera" && cameraActive ? (
+                <>
+                  <video 
+                    ref={videoRef}
+                    className="w-full h-full object-cover"
+                    playsInline
+                    autoPlay
+                    muted
+                  />
+                  {/* Targeting reticle */}
+                  <div className="absolute inset-0 pointer-events-none">
+                    <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <rect 
+                        x="10" y="10" width="80" height="80" 
+                        fill="none" 
+                        stroke="rgba(245, 158, 11, 0.5)" 
+                        strokeWidth="0.5"
+                        strokeDasharray="5,5"
+                      />
+                      <line x1="10" y1="10" x2="20" y2="10" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="10" y1="10" x2="10" y2="20" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="90" y1="10" x2="80" y2="10" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="90" y1="10" x2="90" y2="20" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="10" y1="90" x2="20" y2="90" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="10" y1="90" x2="10" y2="80" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="90" y1="90" x2="80" y2="90" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                      <line x1="90" y1="90" x2="90" y2="80" stroke="rgb(245, 158, 11)" strokeWidth="1" />
+                    </svg>
+                  </div>
+                </>
+              ) : (
+                <div 
+                  className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="upload-area"
+                >
+                  <Upload className="w-12 h-12 text-zinc-500 mb-4" />
+                  <p className="text-zinc-400 text-center">
+                    Click or drag to upload<br />
+                    <span className="text-sm text-zinc-500">PNG, JPG, WEBP</span>
+                  </p>
+                </div>
+              )}
+              <canvas ref={canvasRef} className="hidden" />
+            </div>
+
+            <input 
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              data-testid="file-input"
+            />
+
+            {mode === "upload" && !imageBase64 && (
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
+                data-testid="select-file-btn"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Select File
+              </Button>
+            )}
+
+            {mode === "camera" && cameraActive && !imageBase64 && (
+              <Button
+                onClick={captureImage}
+                className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
+                data-testid="capture-btn"
+              >
+                <Camera className="w-4 h-4 mr-2" />
+                Capture
+              </Button>
+            )}
+          </div>
+
+          {/* Right: Card Details Form */}
+          <div className="bg-zinc-900 border border-white/10 rounded-lg p-6">
+            <h2 className="text-lg font-medium text-zinc-50 mb-6">Card Details</h2>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="card_name" className="text-zinc-300">Card Name *</Label>
+                <Input
+                  id="card_name"
+                  value={cardData.card_name}
+                  onChange={(e) => setCardData({ ...cardData, card_name: e.target.value })}
+                  placeholder="e.g., Michael Jordan Rookie"
+                  data-testid="card-name-input"
+                  className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="card_type" className="text-zinc-300">Card Type *</Label>
+                <Select
+                  value={cardData.card_type}
+                  onValueChange={(value) => setCardData({ ...cardData, card_type: value })}
+                >
+                  <SelectTrigger 
+                    data-testid="card-type-select"
+                    className="mt-1 bg-zinc-950 border-white/10 text-zinc-50"
+                  >
+                    <SelectValue placeholder="Select card type" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-white/10">
+                    {CARD_TYPES.map(type => (
+                      <SelectItem 
+                        key={type} 
+                        value={type}
+                        className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
+                      >
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="card_year" className="text-zinc-300">Year</Label>
+                <Input
+                  id="card_year"
+                  value={cardData.card_year}
+                  onChange={(e) => setCardData({ ...cardData, card_year: e.target.value })}
+                  placeholder="e.g., 1986"
+                  data-testid="card-year-input"
+                  className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="damage_notes" className="text-zinc-300">Condition Notes</Label>
+                <Textarea
+                  id="damage_notes"
+                  value={cardData.damage_notes}
+                  onChange={(e) => setCardData({ ...cardData, damage_notes: e.target.value })}
+                  placeholder="e.g., Minor corner whitening, light scratches..."
+                  rows={3}
+                  data-testid="damage-notes-input"
+                  className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500 resize-none"
+                />
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <Button
+                  onClick={handleSaveCard}
+                  disabled={saving || !cardData.card_name || !cardData.card_type}
+                  data-testid="save-card-btn"
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold disabled:opacity-50"
+                >
+                  {saving ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4 mr-2" />
+                  )}
+                  Save to Collection
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/dashboard")}
+                  data-testid="cancel-btn"
+                  className="border-white/20 text-zinc-300 hover:bg-zinc-800"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
