@@ -87,22 +87,33 @@ export default function Scanner() {
       tracks.forEach(track => track.stop());
     }
 
-    if (!deviceId) {
-      toast.error("No camera device selected");
-      return;
-    }
-
     try {
-      const constraints = {
-        video: { deviceId: { exact: deviceId } }
-      };
+      let constraints;
+      
+      if (deviceId) {
+        // Use specific device if provided
+        constraints = {
+          video: { deviceId: { exact: deviceId } }
+        };
+      } else {
+        // Mobile-friendly default: prefer back camera
+        constraints = {
+          video: { facingMode: "environment" }
+        };
+      }
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setCameraActive(true);
+        // Use onloadedmetadata to ensure video is ready
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play()
+            .then(() => {
+              setCameraActive(true);
+            })
+            .catch(err => console.error("Play error:", err));
+        };
       }
     } catch (error) {
       console.error("Camera error:", error);
@@ -112,8 +123,13 @@ export default function Scanner() {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          setCameraActive(true);
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current.play()
+              .then(() => {
+                setCameraActive(true);
+              })
+              .catch(err => console.error("Play error:", err));
+          };
         }
       } catch (fallbackError) {
         toast.error("Failed to access camera. Check permissions and try again.");
@@ -547,9 +563,18 @@ export default function Scanner() {
                       <line x1="90" y1="90" x2="90" y2="80" stroke="rgb(245, 158, 11)" strokeWidth="1" />
                     </svg>
                   </div>
-                  <div className="absolute bottom-2 left-2 bg-zinc-900/80 px-3 py-1 rounded text-sm text-zinc-50 uppercase tracking-wider">
+                  {/* Side indicator */}
+                  <div className="absolute top-2 left-2 bg-zinc-900/80 px-3 py-1 rounded text-sm text-zinc-50 uppercase tracking-wider">
                     {currentSide}
                   </div>
+                  {/* Floating capture button on video - for mobile */}
+                  <button
+                    onClick={captureImage}
+                    data-testid="capture-overlay-btn"
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-amber-500 hover:bg-amber-400 flex items-center justify-center shadow-lg border-4 border-white"
+                  >
+                    <Camera className="w-8 h-8 text-zinc-950" />
+                  </button>
                 </>
               ) : mode === "camera" ? (
                 <div 
