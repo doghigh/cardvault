@@ -69,38 +69,90 @@ export default function Scanner() {
 
   const currentImage = currentSide === "front" ? imageFrontBase64 : imageBackBase64;
 
-  // Enumerate available video devices (cameras, virtual cameras, capture cards)
+  // Stop camera helper
+  const stopCamera = useCallback(() => {
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+  }, []);
+
+  // Start camera with specific device
+  const startCamera = useCallback(async (deviceId) => {
+    // Stop any existing stream first
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+
+    if (!deviceId) {
+      toast.error("No camera device selected");
+      return;
+    }
+
+    try {
+      const constraints = {
+        video: { deviceId: { exact: deviceId } }
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setCameraActive(true);
+      }
+    } catch (error) {
+      console.error("Camera error:", error);
+      
+      // Try with any available camera as fallback
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setCameraActive(true);
+        }
+      } catch (fallbackError) {
+        toast.error("Failed to access camera. Check permissions and try again.");
+      }
+    }
+  }, []);
+
+  // Enumerate available video devices
   const loadVideoDevices = useCallback(async () => {
     setLoadingDevices(true);
     try {
       // Request permission first to get device labels
-      await navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => stream.getTracks().forEach(track => track.stop()))
-        .catch(() => {});
+      try {
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        tempStream.getTracks().forEach(track => track.stop());
+      } catch (permErr) {
+        console.log("Requesting camera permission...");
+      }
       
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(device => device.kind === 'videoinput');
       setVideoDevices(videoInputs);
       
-      // Set default device if none selected
+      // Set default device
       if (videoInputs.length > 0 && !selectedDeviceId) {
         setSelectedDeviceId(videoInputs[0].deviceId);
+        return videoInputs[0].deviceId;
       }
+      return selectedDeviceId;
     } catch (error) {
       console.error("Error enumerating devices:", error);
       toast.error("Failed to detect video devices");
+      return null;
     } finally {
       setLoadingDevices(false);
     }
   }, [selectedDeviceId]);
 
-  useEffect(() => {
-    if (mode === "camera") {
-      loadVideoDevices();
-    }
-  }, [mode, loadVideoDevices]);
-
-  // Listen for device changes (when user plugs in new camera/scanner)
+  // Listen for device changes
   useEffect(() => {
     const handleDeviceChange = () => {
       if (mode === "camera") {
@@ -113,6 +165,16 @@ export default function Scanner() {
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [mode, loadVideoDevices]);
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      if (videoRef.current?.srcObject) {
+        const tracks = videoRef.current.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -157,42 +219,6 @@ export default function Scanner() {
       setAnalyzing(false);
     }
   };
-
-  const startCamera = useCallback(async (deviceId) => {
-    // Stop any existing stream first
-    if (videoRef.current?.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-    }
-
-    try {
-      const constraints = {
-        video: deviceId 
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: "environment" }
-      };
-      
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setCameraActive(true);
-      }
-    } catch (error) {
-      console.error("Camera error:", error);
-      toast.error("Failed to access camera. Check permissions and try again.");
-    }
-  }, []);
-
-  const stopCamera = useCallback(() => {
-    if (videoRef.current?.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-      setCameraActive(false);
-    }
-  }, []);
 
   // Handle device selection change
   const handleDeviceChange = async (deviceId) => {
@@ -307,10 +333,15 @@ export default function Scanner() {
 
   const activateCameraMode = async () => {
     setMode("camera");
-    await loadVideoDevices();
-    if (selectedDeviceId) {
-      await startCamera(selectedDeviceId);
+    const deviceId = await loadVideoDevices();
+    if (deviceId) {
+      await startCamera(deviceId);
     }
+  };
+
+  const activateUploadMode = () => {
+    setMode("upload");
+    stopCamera();
   };
 
   return (
@@ -369,7 +400,7 @@ export default function Scanner() {
             <div className="flex gap-2 mb-4">
               <Button
                 variant={mode === "upload" ? "default" : "outline"}
-                onClick={() => { setMode("upload"); stopCamera(); }}
+                onClick={activateUploadMode}
                 data-testid="upload-mode-btn"
                 className={`flex-1 ${mode === "upload" ? "bg-zinc-700 text-zinc-50" : "border-white/20 text-zinc-300"}`}
               >
@@ -398,7 +429,7 @@ export default function Scanner() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={loadVideoDevices}
+                    onClick={() => loadVideoDevices()}
                     disabled={loadingDevices}
                     className="text-zinc-400 hover:text-zinc-50 h-6 px-2"
                     data-testid="refresh-devices-btn"
@@ -520,17 +551,19 @@ export default function Scanner() {
                     {currentSide}
                   </div>
                 </>
-              ) : mode === "camera" && !cameraActive ? (
+              ) : mode === "camera" ? (
                 <div 
                   className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
-                  onClick={() => startCamera(selectedDeviceId)}
+                  onClick={() => selectedDeviceId && startCamera(selectedDeviceId)}
                   data-testid="start-camera-area"
                 >
                   <Camera className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
-                    Click to start camera<br />
+                    {loadingDevices ? "Loading cameras..." : "Click to start camera"}<br />
                     <span className="text-sm text-zinc-500">
-                      {selectedDeviceId ? videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Selected camera' : 'No camera selected'}
+                      {videoDevices.length === 0 
+                        ? "No cameras detected" 
+                        : videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Camera ready'}
                     </span>
                   </p>
                 </div>
@@ -573,12 +606,16 @@ export default function Scanner() {
             {mode === "camera" && !cameraActive && !currentImage && (
               <Button
                 onClick={() => startCamera(selectedDeviceId)}
-                disabled={!selectedDeviceId}
+                disabled={!selectedDeviceId || loadingDevices}
                 className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold disabled:opacity-50"
                 data-testid="start-camera-btn"
               >
-                <Camera className="w-4 h-4 mr-2" />
-                Start Camera
+                {loadingDevices ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Camera className="w-4 h-4 mr-2" />
+                )}
+                {loadingDevices ? "Loading..." : "Start Camera"}
               </Button>
             )}
 
