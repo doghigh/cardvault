@@ -1,0 +1,81 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 5 (Jewel & Luxury) + Archetype 4 (Swiss & High-Contrast) for data density",
+  "colors": {
+    "background": "bg-zinc-950",
+    "surface": "bg-zinc-900",
+    "surface_glass": "bg-black/60 backdrop-blur-xl border-white/10",
+    "primary": "amber-500",
+    "primary_hover": "amber-400",
+    "text_main": "text-zinc-50",
+    "text_muted": "text-zinc-400",
+    "accent_success": "emerald-400",
+    "accent_danger": "rose-400",
+    "border": "border-white/10"
+  },
+  "typography": {
+    "headings": "font-cabinet-grotesk",
+    "body": "font-manrope",
+    "mono": "font-jetbrains-mono",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-bold",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "body": "text-base leading-relaxed",
+      "labels": "text-xs tracking-[0.2em] uppercase font-bold text-zinc-400",
+      "numbers": "font-jetbrains-mono tracking-tight"
+    }
+  },
+  "layout": {
+    "spacing_scale": "p-4, p-6, p-8, p-12",
+    "grid_strategy": "The Control Room Grid (grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6)",
+    "card_style": "Flat solid surfaces (bg-zinc-900) with 1px border (border-white/10). No soft shadows, use drop-shadow only for floating elements.",
+    "alignment": "Left-align text and dense data. Center-align empty states or hero text."
+  },
+  "components": {
+    "navigation": "Sticky top bar, z-50, Glassmorphism (bg-black/60 backdrop-blur-xl border-b border-white/10). Must contain Logo, Nav Links, User Profile/Login.",
+    "scanner_view": "Split layout. Left: Video feed/Upload box with a targeting reticle (SVG). Right: Extraction results form. Use Shadcn forms but customize with dark slate backgrounds.",
+    "data_tables": "High density. Use JetBrains Mono for prices/years. Use colored badges for condition (emerald for Mint, amber for Near Mint, rose for Damaged).",
+    "buttons": "Square or slightly rounded (rounded-md). Primary: bg-amber-500 text-zinc-950 font-bold. Secondary: bg-transparent border border-white/20 text-white hover:bg-white/10.",
+    "inputs": "Shadcn inputs. bg-zinc-950 border-white/10 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-white."
+  },
+  "motion": {
+    "hover": "Subtle translate-y-[-2px] on cards, transition-colors duration-200.",
+    "loader": "Scanner sweep line animation (using framer-motion or CSS keyframes) over the card image."
+  },
+  "media": {
+    "image_urls": {
+      "placeholder_card": {
+        "url": "https://images.unsplash.com/photo-1672759043238-66899aeaf2ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwzfHxyYXJlJTIwdHJhZGluZyUyMGNhcmQlMjBob2xvZ3JhcGhpY3xlbnwwfHx8fDE3NzQ2Nzc4NjR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Holographic Pokemon trading card, used as placeholder for scanned card preview"
+      },
+      "dashboard_bg": {
+        "url": "https://images.unsplash.com/photo-1761847246291-4404b4569d5d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxkYXJrJTIwc2xhdGUlMjB0ZXh0dXJlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzQ2Nzc4NzB8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark slate texture background. Use with low opacity (10-20%) or multiply blend mode behind main hero or header sections to add texture."
+      },
+      "empty_collection": {
+        "url": "https://images.pexels.com/photos/9343494/pexels-photo-9343494.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Hand holding colorful cards, use for empty state 'Start your collection' screen"
+      }
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "instructions": "Use lucide-react (already installed). Keep icon stroke width to 1.5 for a premium, delicate look."
+  },
+  "accessibility": {
+    "contrast": "Ensure amber text on zinc-950 passes APCA. Use amber-400 for text, amber-500 for backgrounds with black text.",
+    "focus": "All interactive elements must have focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950.",
+    "testing": "All buttons, inputs, and major sections MUST have data-testid attributes."
+  },
+  "instructions_to_main_agent": [
+    "Use standard Tailwind classes. Do not use raw CSS files for styling.",
+    "Use Shadcn UI components for complex logic (Tables, Dialogs, Select) but strip out any default Vercel-like light mode styles and apply the dark slate theme.",
+    "Implement the 'Control Room Grid' for the dashboard showing the collection.",
+    "In the scanner view, the image preview must not exceed 80vh on mobile.",
+    "Use framer-motion for the scanner sweeping line effect over the uploaded image.",
+    "Use Google OAuth for login, design a clean login screen centering the auth button over the dark slate background image.",
+    "NEVER use placeholder text for images. Use the provided media URLs.",
+    "Include data-testid on all interactive elements."
+  ]
+}
