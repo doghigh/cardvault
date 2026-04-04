@@ -1,0 +1,37 @@
+import sqlite3
+import hashlib
+
+class CardVaultDB:
+    def __init__(self, db_path="vault.db"):
+        # Persistent connection is faster than opening/closing constantly
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self._create_tables()
+
+    def _create_tables(self):
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE,
+                pw_hash TEXT
+            )
+        """)
+        self.conn.commit()
+
+    def add_user(self, username, password):
+        # Stop storing plaintext like a hobbyist. Use a hash.
+        h = hashlib.sha256(password.encode()).hexdigest()
+        try:
+            # Parameterized query: Stops SQL Injection dead.
+            self.cursor.execute("INSERT INTO users (username, pw_hash) VALUES (?, ?)", (username, h))
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            print("User already exists. Pay attention.")
+
+    def verify_user(self, username, password):
+        h = hashlib.sha256(password.encode()).hexdigest()
+        self.cursor.execute("SELECT 1 FROM users WHERE username = ? AND pw_hash = ?", (username, h))
+        return self.cursor.fetchone() is not None
+
+    def close(self):
+        self.conn.close()
