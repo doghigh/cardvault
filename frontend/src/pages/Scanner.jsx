@@ -6,19 +6,19 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "../components/ui/select";
 import { toast } from "sonner";
-import { 
-  CreditCard, 
-  Upload, 
-  Camera, 
-  ArrowLeft, 
+import {
+  CreditCard,
+  Upload,
+  Camera,
+  ArrowLeft,
   Loader2,
   Check,
   X,
@@ -26,19 +26,28 @@ import {
   ArrowRight,
   MonitorUp,
   ScanLine,
-  RefreshCw
+  RefreshCw,
 } from "lucide-react";
 
 const CARD_TYPES = [
   "Sports - Baseball",
-  "Sports - Basketball", 
+  "Sports - Basketball",
   "Sports - Football",
   "Sports - Hockey",
   "Pokemon",
   "Yu-Gi-Oh",
   "Magic: The Gathering",
   "Other TCG",
-  "Other"
+  "Other",
+];
+
+const CONDITIONS = [
+  "Mint",
+  "Near Mint",
+  "Excellent",
+  "Good",
+  "Fair",
+  "Poor",
 ];
 
 export default function Scanner() {
@@ -46,89 +55,85 @@ export default function Scanner() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  
-  const [mode, setMode] = useState("upload"); // upload | camera
-  const [currentSide, setCurrentSide] = useState("front"); // front | back
+
+  const [mode, setMode] = useState("upload");
+  const [currentSide, setCurrentSide] = useState("front");
   const [imageFrontBase64, setImageFrontBase64] = useState(null);
   const [imageBackBase64, setImageBackBase64] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [saving, setSaving] = useState(false);
-  
-  // Device selection
+
   const [videoDevices, setVideoDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [loadingDevices, setLoadingDevices] = useState(false);
-  
+
   const [cardData, setCardData] = useState({
     card_name: "",
     card_type: "",
     card_year: "",
-    damage_notes: ""
+    condition: "",
+    notes: "",
+    avg_price: "",
+    top_price: "",
+    bottom_price: "",
+    price_source: "manual",
   });
 
   const currentImage = currentSide === "front" ? imageFrontBase64 : imageBackBase64;
 
-  // Stop camera helper
   const stopCamera = useCallback(() => {
     if (videoRef.current?.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
+      tracks.forEach((track) => track.stop());
       videoRef.current.srcObject = null;
     }
     setCameraActive(false);
   }, []);
 
-  // Start camera with specific device
   const startCamera = useCallback(async (deviceId) => {
-    // Stop any existing stream first
     if (videoRef.current?.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
+      tracks.forEach((track) => track.stop());
     }
 
     try {
       let stream;
-      
-      // Try different approaches to get camera
+
       if (deviceId && deviceId !== "none" && deviceId !== "default") {
-        // Try specific device first
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: deviceId } }
+            video: { deviceId: { exact: deviceId } },
           });
         } catch (e) {
           console.log("Specific device failed, trying default");
         }
       }
-      
-      // If no stream yet, try environment camera (back camera on mobile)
+
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" }
+            video: { facingMode: "environment" },
           });
         } catch (e) {
           console.log("Environment camera failed, trying any camera");
         }
       }
-      
-      // If still no stream, try any camera
+
       if (!stream) {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: true
+          video: true,
         });
       }
-      
+
       if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
-          videoRef.current.play()
+          videoRef.current
+            .play()
             .then(() => {
               setCameraActive(true);
-              console.log("Camera started successfully");
             })
-            .catch(err => {
+            .catch((err) => {
               console.error("Play error:", err);
               toast.error("Failed to start camera preview");
             });
@@ -141,33 +146,27 @@ export default function Scanner() {
     }
   }, []);
 
-  // Enumerate available video devices
   const loadVideoDevices = useCallback(async () => {
     setLoadingDevices(true);
     try {
-      // Check if mediaDevices API is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-        console.log("mediaDevices API not supported");
         setVideoDevices([]);
         setLoadingDevices(false);
         return null;
       }
 
-      // Request permission first to get device labels
       try {
         const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        tempStream.getTracks().forEach(track => track.stop());
+        tempStream.getTracks().forEach((track) => track.stop());
       } catch (permErr) {
         console.log("Camera permission request:", permErr.message);
       }
-      
+
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoInputs = devices.filter(device => device.kind === 'videoinput');
-      
-      console.log("Found video devices:", videoInputs.length);
+      const videoInputs = devices.filter((device) => device.kind === "videoinput");
+
       setVideoDevices(videoInputs);
-      
-      // Set default device
+
       if (videoInputs.length > 0) {
         const deviceId = videoInputs[0].deviceId || "default";
         if (!selectedDeviceId) {
@@ -175,39 +174,39 @@ export default function Scanner() {
         }
         return deviceId;
       }
+
       return null;
     } catch (error) {
       console.error("Error enumerating devices:", error);
-      // Don't show error - we'll try direct camera access
       return null;
     } finally {
       setLoadingDevices(false);
     }
   }, [selectedDeviceId]);
 
-  // Listen for device changes
   useEffect(() => {
-    const handleDeviceChange = () => {
+    const handleMediaDeviceChange = () => {
       if (mode === "camera") {
         loadVideoDevices();
       }
     };
-    
-    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+
+    if (navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", handleMediaDeviceChange);
+    }
+
     return () => {
-      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+      if (navigator.mediaDevices?.removeEventListener) {
+        navigator.mediaDevices.removeEventListener("devicechange", handleMediaDeviceChange);
+      }
     };
   }, [mode, loadVideoDevices]);
 
-  // Cleanup camera on unmount
   useEffect(() => {
-    return () => {
-      if (videoRef.current?.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
-      }
-    };
-  }, []);
+  return () => {
+    stopCamera();
+  };
+}, [stopCamera]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -215,45 +214,22 @@ export default function Scanner() {
 
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const base64 = event.target.result;
-      
+      const base64 = event.target?.result;
+      if (!base64) return;
+
       if (currentSide === "front") {
         setImageFrontBase64(base64);
-        await analyzeImage(base64);
+        toast.success("Front image added");
       } else {
         setImageBackBase64(base64);
-        toast.success("Back image captured!");
+        toast.success("Back image added");
       }
     };
+
     reader.readAsDataURL(file);
-    e.target.value = '';
+    e.target.value = "";
   };
 
-  const analyzeImage = async (base64Data) => {
-    setAnalyzing(true);
-    try {
-      const response = await axios.post(`${API}/cards/analyze-base64`, {
-        image_base64: base64Data,
-        side: currentSide
-      });
-      
-      setCardData({
-        card_name: response.data.card_name || "",
-        card_type: response.data.card_type || "",
-        card_year: response.data.card_year || "",
-        damage_notes: response.data.damage_notes || ""
-      });
-      
-      toast.success("Card analyzed successfully!");
-    } catch (error) {
-      console.error("Analysis error:", error);
-      toast.error("Failed to analyze card. Please fill in details manually.");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  // Handle device selection change
   const handleDeviceChange = async (deviceId) => {
     setSelectedDeviceId(deviceId);
     if (cameraActive) {
@@ -266,24 +242,39 @@ export default function Scanner() {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
+
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0);
-    
+
     const base64 = canvas.toDataURL("image/jpeg", 0.9);
-    
+
     if (currentSide === "front") {
       setImageFrontBase64(base64);
-      stopCamera();
-      await analyzeImage(base64);
+      toast.success("Front image captured");
     } else {
       setImageBackBase64(base64);
-      stopCamera();
-      toast.success("Back image captured!");
+      toast.success("Back image captured");
     }
-  }, [stopCamera, currentSide]);
+
+    stopCamera();
+  }, [currentSide, stopCamera]);
+
+  const normalizeImage = (dataUrl) => {
+    if (!dataUrl) return null;
+    if (dataUrl.includes(",")) {
+      return dataUrl.split(",")[1];
+    }
+    return dataUrl;
+  };
+
+  const parsePrice = (value) => {
+    if (value === "" || value == null) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
 
   const handleSaveCard = async () => {
     if (!cardData.card_name || !cardData.card_type) {
@@ -302,26 +293,23 @@ export default function Scanner() {
     }
 
     setSaving(true);
+
     try {
-      let frontData = imageFrontBase64;
-      if (frontData && frontData.includes(",")) {
-        frontData = frontData.split(",")[1];
-      }
-
-      let backData = imageBackBase64;
-      if (backData && backData.includes(",")) {
-        backData = backData.split(",")[1];
-      }
-
-      await axios.post(`${API}/cards`, {
+      const payload = {
         card_name: cardData.card_name,
         card_type: cardData.card_type,
         card_year: cardData.card_year || null,
-        damage_notes: cardData.damage_notes || null,
-        image_front_base64: frontData,
-        image_back_base64: backData
-      });
-      
+        condition: cardData.condition || null,
+        notes: cardData.notes || null,
+        avg_price: parsePrice(cardData.avg_price),
+        top_price: parsePrice(cardData.top_price),
+        bottom_price: parsePrice(cardData.bottom_price),
+        price_source: "manual",
+        image_front_base64: normalizeImage(imageFrontBase64),
+        image_back_base64: normalizeImage(imageBackBase64),
+      };
+
+      await axios.post(`${API}/cards`, payload);
       toast.success("Card saved to collection!");
       navigate("/dashboard");
     } catch (error) {
@@ -349,7 +337,12 @@ export default function Scanner() {
       card_name: "",
       card_type: "",
       card_year: "",
-      damage_notes: ""
+      condition: "",
+      notes: "",
+      avg_price: "",
+      top_price: "",
+      bottom_price: "",
+      price_source: "manual",
     });
     stopCamera();
   };
@@ -367,7 +360,6 @@ export default function Scanner() {
   const activateCameraMode = async () => {
     setMode("camera");
     const deviceId = await loadVideoDevices();
-    // Start camera regardless of whether we got a specific device ID
     await startCamera(deviceId || "default");
   };
 
@@ -378,7 +370,6 @@ export default function Scanner() {
 
   return (
     <div className="min-h-screen bg-zinc-950">
-      {/* Navigation */}
       <header className="glass sticky top-0 z-50 border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Link to="/dashboard" className="flex items-center gap-3">
@@ -389,8 +380,8 @@ export default function Scanner() {
           </Link>
 
           <Link to="/dashboard">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               data-testid="back-btn"
               className="text-zinc-300 hover:text-zinc-50"
             >
@@ -402,13 +393,11 @@ export default function Scanner() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-2">Scan Card</h1>
-        <p className="text-zinc-400 mb-8">Capture both front and back of your card</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-2">Add Card</h1>
+        <p className="text-zinc-400 mb-8">Capture or upload the front and back of your card, then enter details manually.</p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Image Capture */}
           <div className="bg-zinc-900 border border-white/10 rounded-lg p-6">
-            {/* Side Toggle */}
             <div className="flex gap-2 mb-4">
               <Button
                 variant={currentSide === "front" ? "default" : "outline"}
@@ -428,7 +417,6 @@ export default function Scanner() {
               </Button>
             </div>
 
-            {/* Mode Toggle */}
             <div className="flex gap-2 mb-4">
               <Button
                 variant={mode === "upload" ? "default" : "outline"}
@@ -450,7 +438,6 @@ export default function Scanner() {
               </Button>
             </div>
 
-            {/* Device Selector (Camera Mode) */}
             {mode === "camera" && (
               <div className="mb-4 p-3 bg-zinc-800 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
@@ -466,14 +453,15 @@ export default function Scanner() {
                     className="text-zinc-400 hover:text-zinc-50 h-6 px-2"
                     data-testid="refresh-devices-btn"
                   >
-                    <RefreshCw className={`w-3 h-3 ${loadingDevices ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-3 h-3 ${loadingDevices ? "animate-spin" : ""}`} />
                   </Button>
                 </div>
+
                 <Select
                   value={selectedDeviceId || "default"}
                   onValueChange={(value) => value !== "none" && handleDeviceChange(value)}
                 >
-                  <SelectTrigger 
+                  <SelectTrigger
                     data-testid="device-select"
                     className="bg-zinc-900 border-white/10 text-zinc-50"
                   >
@@ -484,8 +472,8 @@ export default function Scanner() {
                       Default Camera
                     </SelectItem>
                     {videoDevices.map((device, index) => (
-                      <SelectItem 
-                        key={device.deviceId || `device-${index}`} 
+                      <SelectItem
+                        key={device.deviceId || `device-${index}`}
                         value={device.deviceId || `device-${index}`}
                         className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
                       >
@@ -494,13 +482,13 @@ export default function Scanner() {
                     ))}
                   </SelectContent>
                 </Select>
+
                 <p className="text-xs text-zinc-500 mt-2">
-                  Includes webcams, virtual cameras (OBS, etc.), and capture cards
+                  Includes webcams, virtual cameras, and capture cards.
                 </p>
               </div>
             )}
 
-            {/* Scanner Info (Upload Mode) */}
             {mode === "upload" && (
               <div className="mb-4 p-3 bg-zinc-800 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
@@ -508,32 +496,20 @@ export default function Scanner() {
                   <span className="text-sm text-zinc-300">Flatbed Scanner Support</span>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Use your scanner software to scan the card, then upload the image file here. 
+                  Use your scanner software to scan the card, then upload the image file here.
                   Supports JPEG, PNG, WEBP, TIFF, and BMP formats.
                 </p>
               </div>
             )}
 
-            {/* Image Preview / Upload Area */}
             <div className="aspect-[3/4] bg-zinc-800 rounded-lg overflow-hidden relative mb-4">
               {currentImage ? (
                 <>
-                  <img 
+                  <img
                     src={currentImage}
                     alt={`Card ${currentSide}`}
                     className="w-full h-full object-contain"
                   />
-                  {analyzing && (
-                    <div className="absolute inset-0 bg-zinc-950/80 flex flex-col items-center justify-center">
-                      <div className="relative w-full h-full">
-                        <div className="absolute left-0 right-0 h-1 bg-amber-500 scanner-line"></div>
-                      </div>
-                      <div className="absolute flex flex-col items-center">
-                        <Loader2 className="w-8 h-8 text-amber-500 animate-spin mb-2" />
-                        <p className="text-zinc-300 text-sm">Analyzing card...</p>
-                      </div>
-                    </div>
-                  )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -549,20 +525,22 @@ export default function Scanner() {
                 </>
               ) : mode === "camera" && cameraActive ? (
                 <>
-                  <video 
+                  <video
                     ref={videoRef}
                     className="w-full h-full object-cover"
                     playsInline
                     autoPlay
                     muted
                   />
-                  {/* Targeting reticle */}
                   <div className="absolute inset-0 pointer-events-none">
                     <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                      <rect 
-                        x="10" y="10" width="80" height="80" 
-                        fill="none" 
-                        stroke="rgba(245, 158, 11, 0.5)" 
+                      <rect
+                        x="10"
+                        y="10"
+                        width="80"
+                        height="80"
+                        fill="none"
+                        stroke="rgba(245, 158, 11, 0.5)"
                         strokeWidth="0.5"
                         strokeDasharray="5,5"
                       />
@@ -576,11 +554,9 @@ export default function Scanner() {
                       <line x1="90" y1="90" x2="90" y2="80" stroke="rgb(245, 158, 11)" strokeWidth="1" />
                     </svg>
                   </div>
-                  {/* Side indicator */}
                   <div className="absolute top-2 left-2 bg-zinc-900/80 px-3 py-1 rounded text-sm text-zinc-50 uppercase tracking-wider">
                     {currentSide}
                   </div>
-                  {/* Floating capture button on video - for mobile */}
                   <button
                     onClick={captureImage}
                     data-testid="capture-overlay-btn"
@@ -590,28 +566,32 @@ export default function Scanner() {
                   </button>
                 </>
               ) : mode === "camera" ? (
-                <div 
+                <div
                   className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
                   onClick={() => startCamera(selectedDeviceId || "default")}
                   data-testid="start-camera-area"
                 >
                   <Camera className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
-                    {loadingDevices ? "Loading cameras..." : "Tap to start camera"}<br />
+                    {loadingDevices ? "Loading cameras..." : "Tap to start camera"}
+                    <br />
                     <span className="text-sm text-zinc-500">
-                      {selectedDeviceId && videoDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Default Camera'}
+                      {(selectedDeviceId &&
+                        videoDevices.find((d) => d.deviceId === selectedDeviceId)?.label) ||
+                        "Default Camera"}
                     </span>
                   </p>
                 </div>
               ) : (
-                <div 
+                <div
                   className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors"
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="upload-area"
                 >
                   <Upload className="w-12 h-12 text-zinc-500 mb-4" />
                   <p className="text-zinc-400 text-center">
-                    Upload {currentSide} of card<br />
+                    Upload {currentSide} of card
+                    <br />
                     <span className="text-sm text-zinc-500">From scanner or file</span>
                   </p>
                 </div>
@@ -619,7 +599,7 @@ export default function Scanner() {
               <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            <input 
+            <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
@@ -666,7 +646,6 @@ export default function Scanner() {
               </Button>
             )}
 
-            {/* Quick navigation between sides */}
             {currentImage && currentSide === "front" && !imageBackBase64 && (
               <Button
                 onClick={switchToBack}
@@ -678,9 +657,8 @@ export default function Scanner() {
               </Button>
             )}
 
-            {/* Thumbnails */}
             <div className="flex gap-4 mt-4">
-              <div 
+              <div
                 className={`flex-1 aspect-[3/4] rounded border-2 overflow-hidden cursor-pointer ${currentSide === "front" ? "border-amber-500" : "border-white/10"}`}
                 onClick={switchToFront}
               >
@@ -692,7 +670,8 @@ export default function Scanner() {
                   </div>
                 )}
               </div>
-              <div 
+
+              <div
                 className={`flex-1 aspect-[3/4] rounded border-2 overflow-hidden cursor-pointer ${currentSide === "back" ? "border-amber-500" : "border-white/10"}`}
                 onClick={switchToBack}
               >
@@ -719,7 +698,6 @@ export default function Scanner() {
             )}
           </div>
 
-          {/* Right: Card Details Form */}
           <div className="bg-zinc-900 border border-white/10 rounded-lg p-6">
             <h2 className="text-lg font-medium text-zinc-50 mb-6">Card Details</h2>
 
@@ -742,16 +720,16 @@ export default function Scanner() {
                   value={cardData.card_type}
                   onValueChange={(value) => setCardData({ ...cardData, card_type: value })}
                 >
-                  <SelectTrigger 
+                  <SelectTrigger
                     data-testid="card-type-select"
                     className="mt-1 bg-zinc-950 border-white/10 text-zinc-50"
                   >
                     <SelectValue placeholder="Select card type" />
                   </SelectTrigger>
                   <SelectContent className="bg-zinc-900 border-white/10">
-                    {CARD_TYPES.map(type => (
-                      <SelectItem 
-                        key={type} 
+                    {CARD_TYPES.map((type) => (
+                      <SelectItem
+                        key={type}
                         value={type}
                         className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
                       >
@@ -775,19 +753,91 @@ export default function Scanner() {
               </div>
 
               <div>
-                <Label htmlFor="damage_notes" className="text-zinc-300">Condition Notes</Label>
+                <Label htmlFor="condition" className="text-zinc-300">Condition</Label>
+                <Select
+                  value={cardData.condition}
+                  onValueChange={(value) => setCardData({ ...cardData, condition: value })}
+                >
+                  <SelectTrigger
+                    data-testid="condition-select"
+                    className="mt-1 bg-zinc-950 border-white/10 text-zinc-50"
+                  >
+                    <SelectValue placeholder="Select condition" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-white/10">
+                    {CONDITIONS.map((condition) => (
+                      <SelectItem
+                        key={condition}
+                        value={condition}
+                        className="text-zinc-50 hover:bg-zinc-800 focus:bg-zinc-800"
+                      >
+                        {condition}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="notes" className="text-zinc-300">Notes</Label>
                 <Textarea
-                  id="damage_notes"
-                  value={cardData.damage_notes}
-                  onChange={(e) => setCardData({ ...cardData, damage_notes: e.target.value })}
-                  placeholder="e.g., Minor corner whitening, light scratches..."
+                  id="notes"
+                  value={cardData.notes}
+                  onChange={(e) => setCardData({ ...cardData, notes: e.target.value })}
+                  placeholder="e.g., Minor corner whitening, light scratches, pulled from childhood binder..."
                   rows={3}
-                  data-testid="damage-notes-input"
+                  data-testid="notes-input"
                   className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500 resize-none"
                 />
               </div>
 
-              {/* Image status */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="avg_price" className="text-zinc-300">Average Price</Label>
+                  <Input
+                    id="avg_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={cardData.avg_price}
+                    onChange={(e) => setCardData({ ...cardData, avg_price: e.target.value })}
+                    placeholder="0.00"
+                    data-testid="avg-price-input"
+                    className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="top_price" className="text-zinc-300">Top Price</Label>
+                  <Input
+                    id="top_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={cardData.top_price}
+                    onChange={(e) => setCardData({ ...cardData, top_price: e.target.value })}
+                    placeholder="0.00"
+                    data-testid="top-price-input"
+                    className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="bottom_price" className="text-zinc-300">Bottom Price</Label>
+                  <Input
+                    id="bottom_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={cardData.bottom_price}
+                    onChange={(e) => setCardData({ ...cardData, bottom_price: e.target.value })}
+                    placeholder="0.00"
+                    data-testid="bottom-price-input"
+                    className="mt-1 bg-zinc-950 border-white/10 text-zinc-50 placeholder:text-zinc-500"
+                  />
+                </div>
+              </div>
+
               <div className="p-3 bg-zinc-800 rounded-lg">
                 <p className="text-xs text-zinc-400 uppercase tracking-wider mb-2">Images</p>
                 <div className="flex gap-4">
@@ -824,6 +874,7 @@ export default function Scanner() {
                   )}
                   Save to Collection
                 </Button>
+
                 <Button
                   variant="outline"
                   onClick={() => navigate("/dashboard")}

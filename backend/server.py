@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from starlette.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -9,6 +10,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
+import io
+import csv
 from datetime import datetime, timezone, timedelta
 import base64
 import httpx
@@ -23,7 +26,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # LLM Key
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+# EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Create the main app
 app = FastAPI()
@@ -57,9 +60,11 @@ class Card(BaseModel):
     card_id: str = Field(default_factory=lambda: f"card_{uuid.uuid4().hex[:12]}")
     user_id: str
     card_name: str
-    card_type: str  # Sports, Pokemon, TCG, etc.
+    card_type: str
     card_year: Optional[str] = None
-    damage_notes: Optional[str] = None
+    condition: Optional[str] = None        # NEW
+    notes: Optional[str] = None            # NEW
+    damage_notes: Optional[str] = None     # legacy, keep for now
     image_front_base64: Optional[str] = None
     image_back_base64: Optional[str] = None
     avg_price: Optional[float] = None
@@ -74,6 +79,8 @@ class CardCreate(BaseModel):
     card_name: str
     card_type: str
     card_year: Optional[str] = None
+    condition: Optional[str] = None
+    notes: Optional[str] = None
     damage_notes: Optional[str] = None
     image_front_base64: Optional[str] = None
     image_back_base64: Optional[str] = None
@@ -82,45 +89,47 @@ class CardUpdate(BaseModel):
     card_name: Optional[str] = None
     card_type: Optional[str] = None
     card_year: Optional[str] = None
+    condition: Optional[str] = None
+    notes: Optional[str] = None
     damage_notes: Optional[str] = None
     avg_price: Optional[float] = None
     top_price: Optional[float] = None
     bottom_price: Optional[float] = None
 
-class PriceUpdate(BaseModel):
+class PriceUpdateSimple(BaseModel):
     avg_price: float
     top_price: float
     bottom_price: float
     price_source: str = "manual"
+
 
 class CardAnalysisResult(BaseModel):
     card_name: str
     card_type: str
     card_year: Optional[str] = None
     damage_notes: Optional[str] = None
-
 # ==================== AUTH HELPERS ====================
 
 async def get_current_user(request: Request) -> User:
     """Get current user from session token cookie or Authorization header"""
     session_token = request.cookies.get("session_token")
-    
+
     if not session_token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             session_token = auth_header[7:]
-    
+
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
+
     session_doc = await db.user_sessions.find_one(
         {"session_token": session_token},
         {"_id": 0}
     )
-    
+
     if not session_doc:
         raise HTTPException(status_code=401, detail="Invalid session")
-    
+
     expires_at = session_doc["expires_at"]
     if isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at)
@@ -128,26 +137,36 @@ async def get_current_user(request: Request) -> User:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Session expired")
-    
+
     user_doc = await db.users.find_one(
         {"user_id": session_doc["user_id"]},
         {"_id": 0}
     )
-    
+
     if not user_doc:
         raise HTTPException(status_code=401, detail="User not found")
-    
+
     return User(**user_doc)
 
+
+async def get_dev_user() -> User:
+    """Temporary local dev user while auth is disabled."""
+    return User(
+        user_id="dev_user",
+        email="dev@example.com",
+        name="Dev User",
+        picture=None,
+    )
 # ==================== AUTH ROUTES ====================
 
 @api_router.get("/auth/session")
 async def exchange_session(session_id: str, response: Response):
     """Exchange session_id from Emergent Auth for user data and set cookie"""
     try:
+        auth_service_url = os.environ.get('AUTH_SERVICE_URL', 'https://demobackend.emergentagent.com')
         async with httpx.AsyncClient() as client_http:
             auth_response = await client_http.get(
-                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                f"{auth_service_url}/auth/v1/env/oauth/session-data",
                 headers={"X-Session-ID": session_id}
             )
             
@@ -205,10 +224,34 @@ async def exchange_session(session_id: str, response: Response):
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     return user_doc
 
-@api_router.get("/auth/me")
-async def get_me(user: User = Depends(get_current_user)):
-    """Get current authenticated user"""
-    return user.model_dump()
+
+@api_router.put("/cards/{card_id}/price")
+async def update_price(
+    card_id: str,
+    price_data: PriceUpdateSimple,
+    user: User = Depends(get_dev_user),  # or get_current_user later
+):
+    result = await db.cards.update_one(
+        {"card_id": card_id, "user_id": user.user_id},
+        {"$set": {
+            "avg_price": price_data.avg_price,
+            "top_price": price_data.top_price,
+            "bottom_price": price_data.bottom_price,
+            "price_source": price_data.price_source,
+            "price_updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    updated_card = await db.cards.find_one(
+        {"card_id": card_id, "user_id": user.user_id},
+        {"_id": 0})
+    return updated_card
+
+
 
 @api_router.post("/auth/logout")
 async def logout(request: Request, response: Response):
@@ -226,60 +269,19 @@ async def logout(request: Request, response: Response):
     )
     return {"message": "Logged out successfully"}
 
-# ==================== CARD ANALYSIS (GPT-5.2 Vision) ====================
+# ==================== CARD ANALYSIS (stubbed for local dev) ====================
 
 async def analyze_card_image(image_base64: str) -> CardAnalysisResult:
-    """Analyze card image using GPT-5.2 Vision"""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-    
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"card_analysis_{uuid.uuid4().hex[:8]}",
-        system_message="""You are an expert trading card analyst. Analyze the card image and extract:
-1. Card Name: The name of the card/player/character
-2. Card Type: One of (Sports - Baseball, Sports - Basketball, Sports - Football, Sports - Hockey, Pokemon, Yu-Gi-Oh, Magic: The Gathering, Other TCG, Other)
-3. Card Year: The year printed on the card (if visible)
-4. Damage Notes: Note any visible damage such as creases, scratches, whitening, centering issues, etc.
-
-Respond in this exact JSON format:
-{
-    "card_name": "Name here",
-    "card_type": "Type here",
-    "card_year": "Year or null",
-    "damage_notes": "Description or null if no damage visible"
-}"""
-    ).with_model("openai", "gpt-5.2")
-    
-    image_content = ImageContent(image_base64=image_base64)
-    
-    user_message = UserMessage(
-        text="Please analyze this trading card image and extract the card details.",
-        file_contents=[image_content]
-    )
-    
-    response = await chat.send_message(user_message)
-    
-    try:
-        import json
-        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            return CardAnalysisResult(
-                card_name=data.get("card_name", "Unknown Card"),
-                card_type=data.get("card_type", "Other"),
-                card_year=data.get("card_year"),
-                damage_notes=data.get("damage_notes")
-            )
-    except Exception as e:
-        logger.error(f"Failed to parse GPT response: {e}")
-    
+    """
+    Stub for local development: return generic values without calling external LLM.
+    """
+    # You can add simple heuristics here later if you want.
     return CardAnalysisResult(
         card_name="Unknown Card",
         card_type="Other",
         card_year=None,
-        damage_notes=None
+        damage_notes=None,
     )
-
 # ==================== PRICE SCRAPING ====================
 
 async def scrape_ebay_prices(card_name: str, card_year: Optional[str] = None) -> dict:
@@ -334,7 +336,7 @@ async def scrape_ebay_prices(card_name: str, card_year: Optional[str] = None) ->
 @api_router.post("/cards/analyze")
 async def analyze_card(
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_dev_user)
 ):
     """Analyze uploaded card image and extract details"""
     content = await file.read()
@@ -353,7 +355,7 @@ async def analyze_card(
 @api_router.post("/cards/analyze-base64")
 async def analyze_card_base64(
     data: dict,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_dev_user)
 ):
     """Analyze card image from base64 string"""
     image_base64 = data.get("image_base64", "")
@@ -381,7 +383,7 @@ async def analyze_card_base64(
 @api_router.post("/cards", response_model=dict)
 async def create_card(
     card_data: CardCreate,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_dev_user)
 ):
     """Create a new card in the collection"""
     card = Card(
@@ -389,11 +391,12 @@ async def create_card(
         card_name=card_data.card_name,
         card_type=card_data.card_type,
         card_year=card_data.card_year,
+        condition=card_data.condition,
+        notes=card_data.notes or card_data.damage_notes,
         damage_notes=card_data.damage_notes,
         image_front_base64=card_data.image_front_base64,
-        image_back_base64=card_data.image_back_base64
-    )
-    
+        image_back_base64=card_data.image_back_base64,
+)
     card_dict = card.model_dump()
     card_dict['created_at'] = card_dict['created_at'].isoformat()
     card_dict['updated_at'] = card_dict['updated_at'].isoformat()
@@ -404,7 +407,7 @@ async def create_card(
     return card_dict
 
 @api_router.get("/cards")
-async def get_cards(user: User = Depends(get_current_user)):
+async def get_cards(user: User = Depends(get_dev_user)):
     """Get all cards for current user"""
     cards = await db.cards.find(
         {"user_id": user.user_id},
@@ -413,7 +416,7 @@ async def get_cards(user: User = Depends(get_current_user)):
     return cards
 
 @api_router.get("/cards/{card_id}")
-async def get_card(card_id: str, user: User = Depends(get_current_user)):
+async def get_card(card_id: str, user: User = Depends(get_dev_user)):
     """Get a specific card"""
     card = await db.cards.find_one(
         {"card_id": card_id, "user_id": user.user_id},
@@ -427,7 +430,7 @@ async def get_card(card_id: str, user: User = Depends(get_current_user)):
 async def update_card(
     card_id: str,
     update_data: CardUpdate,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_dev_user)
 ):
     """Update a card"""
     update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
@@ -448,7 +451,7 @@ async def update_card(
     return updated_card
 
 @api_router.delete("/cards/{card_id}")
-async def delete_card(card_id: str, user: User = Depends(get_current_user)):
+async def delete_card(card_id: str, user: User = Depends(get_dev_user)):
     """Delete a card"""
     result = await db.cards.delete_one(
         {"card_id": card_id, "user_id": user.user_id}
@@ -459,8 +462,8 @@ async def delete_card(card_id: str, user: User = Depends(get_current_user)):
     
     return {"message": "Card deleted successfully"}
 
-@api_router.post("/cards/{card_id}/lookup-price")
-async def lookup_card_price(card_id: str, user: User = Depends(get_current_user)):
+@api_router.put("/cards/{card_id}/lookup-price")
+async def lookup_card_price(card_id: str, user: User = Depends(get_dev_user)):
     """Scrape eBay for card prices"""
     card = await db.cards.find_one(
         {"card_id": card_id, "user_id": user.user_id},
@@ -501,8 +504,8 @@ async def lookup_card_price(card_id: str, user: User = Depends(get_current_user)
 @api_router.put("/cards/{card_id}/manual-price")
 async def update_manual_price(
     card_id: str,
-    price_data: PriceUpdate,
-    user: User = Depends(get_current_user)
+    price_data: PriceUpdateSimple,
+    user: User = Depends(get_dev_user)
 ):
     """Manually update card prices"""
     result = await db.cards.update_one(
@@ -525,11 +528,74 @@ async def update_manual_price(
         {"_id": 0}
     )
     return updated_card
+@api_router.put("/cards/{card_id}/price")
+async def update_price(
+    card_id: str,
+    price_data: PriceUpdateSimple,
+    user: User = Depends(get_dev_user),
+):
+    result = await db.cards.update_one(
+        {"card_id": card_id, "user_id": user.user_id},
+        {"$set": {
+            "avg_price": price_data.avg_price,
+            "top_price": price_data.top_price,
+            "bottom_price": price_data.bottom_price,
+            "price_source": price_data.price_source,
+            "price_updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    updated_card = await db.cards.find_one(
+        {"card_id": card_id, "user_id": user.user_id},
+        {"_id": 0}
+    )
+    return updated_card
+
+@api_router.get("/cards/export/csv")
+async def export_cards_to_csv(user: User = Depends(get_dev_user)):
+    """Export all cards for the current user to a CSV file."""
+    cards = await db.cards.find(
+        {"user_id": user.user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+
+    if not cards:
+        raise HTTPException(status_code=404, detail="No cards found to export.")
+
+    # Define CSV headers - you can customize this list
+    fieldnames = [
+        "card_id", "card_name", "card_type", "card_year", "damage_notes",
+        "avg_price", "top_price", "bottom_price", "price_source",
+        "price_updated_at", "created_at", "updated_at"
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+
+    writer.writeheader()
+    for card in cards:
+        # Ensure all fields are present, even if None, to avoid DictWriter errors
+        row = {field: card.get(field) for field in fieldnames}
+        writer.writerow(row)
+
+    output.seek(0)
+
+    filename = f"cardvault_collection_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 # ==================== STATS ROUTE ====================
 
 @api_router.get("/stats")
-async def get_stats(user: User = Depends(get_current_user)):
+async def get_stats(user: User = Depends(get_dev_user)):
     """Get collection statistics"""
     cards = await db.cards.find(
         {"user_id": user.user_id},

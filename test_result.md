@@ -101,3 +101,37 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+## user_problem_statement: Initialize testing for implemented P0 features.
+## backend:
+##   - task: "OAuth Session Exchange"
+##     implemented: true
+##     working: "NA"
+##     status_history:
+##         -working: false
+##         -agent: "user"
+##         -comment: "User encountered 'Activate.ps1' not recognized. Explained the requirement for '.\' prefix in PowerShell."
+##     file: "app/backend/server.py"
+##     stuck_count: 2
+##     priority: "high"
+##     needs_retesting: true
+##   - task: "AI Card Analysis"
+##     implemented: true
+##     working: "NA"
+##     file: "app/backend/server.py"
+##     stuck_count: 0
+##     priority: "high"
+##     needs_retesting: true
+##
+## frontend:
+##   - task: "Google Login Flow"
+##     implemented: true
+##     working: "NA"
+##     file: "d:\workspace\vscode\cardvault\cardvault\frontend\src\pages\Landing.jsx"
+##     stuck_count: 0
+##     priority: "high"
+##     needs_retesting: true
+##
+## agent_communication:
+##     -agent: "main"
+##     -message: "User still stuck on venv activation. Provided '.\Activate.ps1' correction and ExecutionPolicy fix. Incremented stuck_count."
