@@ -26,7 +26,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # LLM Key
-# EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+# doghigh_LLM_KEY = os.environ.get('doghigh_LLM_KEY', '')
 
 # Create the main app
 app = FastAPI()
@@ -161,9 +161,9 @@ async def get_dev_user() -> User:
 
 @api_router.get("/auth/session")
 async def exchange_session(session_id: str, response: Response):
-    """Exchange session_id from Emergent Auth for user data and set cookie"""
+    """Exchange session_id from doghigh Auth for user data and set cookie"""
     try:
-        auth_service_url = os.environ.get('AUTH_SERVICE_URL', 'https://demobackend.emergentagent.com')
+        auth_service_url = os.environ.get('AUTH_SERVICE_URL', 'https://demobackend.doghighagent.com')
         async with httpx.AsyncClient() as client_http:
             auth_response = await client_http.get(
                 f"{auth_service_url}/auth/v1/env/oauth/session-data",

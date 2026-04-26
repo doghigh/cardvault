@@ -8,15 +8,15 @@ An app that can scan trading cards, put the scan into a database, read the text 
 - **OCR/Analysis**: OpenAI GPT-5.2 Vision
 - **Price Lookup**: eBay scraping + manual entry
 - **Card Types**: All trading cards (Sports, Pokemon, TCG)
-- **Authentication**: Google OAuth via Emergent
+- **Authentication**: Google OAuth via doghigh
 
 ## Architecture
 
 ### Backend (FastAPI)
 - **Server**: `/app/backend/server.py`
 - **Database**: MongoDB
-- **Auth**: Emergent Google OAuth with session tokens
-- **AI**: GPT-5.2 Vision via emergentintegrations
+- **Auth**: doghigh Google OAuth with session tokens
+- **AI**: GPT-5.2 Vision via doghighintegrations
 
 ### Frontend (React)
 - **Components**: Shadcn UI

@@ -8,7 +8,7 @@ from datetime import datetime
 import time
 
 class CardCatalogAPITester:
-    def __init__(self, base_url="https://card-catalog-pro-1.preview.emergentagent.com", session_token=None):
+    def __init__(self, base_url="https://card-catalog-pro-1.preview.doghighagent.com", session_token=None):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.session_token = session_token or "test_session_frontback_123"
